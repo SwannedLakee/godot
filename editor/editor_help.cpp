@@ -2856,7 +2856,7 @@ void EditorHelp::_compute_doc_version_hash() {
 }
 
 String EditorHelp::get_cache_full_path() {
-	return EditorPaths::get_singleton()->get_cache_dir().path_join("editor_doc_cache.res");
+	return EditorPaths::get_singleton()->get_cache_dir().path_join(vformat("editor_doc_cache-%d.%d.res", VERSION_MAJOR, VERSION_MINOR));
 }
 
 void EditorHelp::load_xml_buffer(const uint8_t *p_buffer, int p_size) {
@@ -3024,6 +3024,7 @@ void EditorHelp::update_doc() {
 void EditorHelp::cleanup_doc() {
 	_wait_for_thread();
 	memdelete(doc);
+	doc = nullptr;
 }
 
 Vector<Pair<String, int>> EditorHelp::get_sections() {
@@ -3761,11 +3762,24 @@ EditorHelpBit::EditorHelpBit(const String &p_symbol) {
 
 /// EditorHelpBitTooltip ///
 
+void EditorHelpBitTooltip::_start_timer() {
+	if (timer->is_inside_tree() && timer->is_stopped()) {
+		timer->start();
+	}
+}
+
 void EditorHelpBitTooltip::_safe_queue_free() {
 	if (_pushing_input > 0) {
 		_need_free = true;
 	} else {
 		queue_free();
+	}
+}
+
+void EditorHelpBitTooltip::_target_gui_input(const Ref<InputEvent> &p_event) {
+	const Ref<InputEventMouse> mouse_event = p_event;
+	if (mouse_event.is_valid()) {
+		_start_timer();
 	}
 }
 
@@ -3775,7 +3789,7 @@ void EditorHelpBitTooltip::_notification(int p_what) {
 			timer->stop();
 			break;
 		case NOTIFICATION_WM_MOUSE_EXIT:
-			timer->start();
+			_start_timer();
 			break;
 	}
 }
@@ -3783,7 +3797,7 @@ void EditorHelpBitTooltip::_notification(int p_what) {
 // Forwards non-mouse input to the parent viewport.
 void EditorHelpBitTooltip::_input_from_window(const Ref<InputEvent> &p_event) {
 	if (p_event->is_action_pressed(SNAME("ui_cancel"), false, true)) {
-		hide(); // Will be deleted on its timer.
+		_safe_queue_free();
 	} else {
 		const Ref<InputEventMouse> mouse_event = p_event;
 		if (mouse_event.is_null()) {
@@ -3801,7 +3815,7 @@ void EditorHelpBitTooltip::_input_from_window(const Ref<InputEvent> &p_event) {
 void EditorHelpBitTooltip::show_tooltip(EditorHelpBit *p_help_bit, Control *p_target) {
 	ERR_FAIL_NULL(p_help_bit);
 	EditorHelpBitTooltip *tooltip = memnew(EditorHelpBitTooltip(p_target));
-	p_help_bit->connect("request_hide", callable_mp(static_cast<Window *>(tooltip), &Window::hide)); // Will be deleted on its timer.
+	p_help_bit->connect("request_hide", callable_mp(tooltip, &EditorHelpBitTooltip::_safe_queue_free));
 	tooltip->add_child(p_help_bit);
 	p_target->get_viewport()->add_child(tooltip);
 	p_help_bit->update_content_height();
@@ -3858,8 +3872,8 @@ EditorHelpBitTooltip::EditorHelpBitTooltip(Control *p_target) {
 	add_child(timer);
 
 	ERR_FAIL_NULL(p_target);
-	p_target->connect(SceneStringName(mouse_entered), callable_mp(timer, &Timer::stop));
-	p_target->connect(SceneStringName(mouse_exited), callable_mp(timer, &Timer::start).bind(-1));
+	p_target->connect(SceneStringName(mouse_exited), callable_mp(this, &EditorHelpBitTooltip::_start_timer));
+	p_target->connect(SceneStringName(gui_input), callable_mp(this, &EditorHelpBitTooltip::_target_gui_input));
 }
 
 #if defined(MODULE_GDSCRIPT_ENABLED) || defined(MODULE_MONO_ENABLED)

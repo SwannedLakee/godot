@@ -1051,6 +1051,9 @@ void Node3DEditorViewport::_select_region() {
 	Vector<Node *> selected;
 
 	Node *edited_scene = get_tree()->get_edited_scene_root();
+	if (edited_scene == nullptr) {
+		return;
+	}
 
 	for (int i = 0; i < instances.size(); i++) {
 		Node3D *sp = Object::cast_to<Node3D>(ObjectDB::get_instance(instances[i]));
@@ -1575,7 +1578,7 @@ void Node3DEditorViewport::_list_select(Ref<InputEventMouseButton> b) {
 			} else {
 				Node *node_owner = node->get_owner();
 				if (node == edited_scene || node_owner == edited_scene || (node_owner != nullptr && edited_scene->is_editable_instance(node_owner))) {
-					if (selection_results.has(node)) {
+					if (!selection_results.has(node)) {
 						selection_results.append(node);
 					}
 					break;
@@ -2903,8 +2906,8 @@ void Node3DEditorViewport::_notification(int p_what) {
 			}
 
 			bool show_info = view_menu->get_popup()->is_item_checked(view_menu->get_popup()->get_item_index(VIEW_INFORMATION));
-			if (show_info != info_label->is_visible()) {
-				info_label->set_visible(show_info);
+			if (show_info != info_panel->is_visible()) {
+				info_panel->set_visible(show_info);
 			}
 
 			Camera3D *current_camera;
@@ -3087,7 +3090,7 @@ void Node3DEditorViewport::_notification(int p_what) {
 			frame_time_gradient->set_color(1, get_theme_color(SNAME("warning_color"), EditorStringName(Editor)));
 			frame_time_gradient->set_color(2, get_theme_color(SNAME("error_color"), EditorStringName(Editor)));
 
-			info_label->add_theme_style_override(CoreStringName(normal), information_3d_stylebox);
+			info_panel->add_theme_style_override(SceneStringName(panel), information_3d_stylebox);
 
 			frame_time_panel->add_theme_style_override(SceneStringName(panel), information_3d_stylebox);
 			// Set a minimum width to prevent the width from changing all the time
@@ -5382,15 +5385,19 @@ Node3DEditorViewport::Node3DEditorViewport(Node3DEditor *p_spatial_editor, int p
 	bottom_center_vbox->set_v_grow_direction(GROW_DIRECTION_BEGIN);
 	surface->add_child(bottom_center_vbox);
 
+	info_panel = memnew(PanelContainer);
+	info_panel->set_anchor_and_offset(SIDE_LEFT, ANCHOR_END, -90 * EDSCALE);
+	info_panel->set_anchor_and_offset(SIDE_TOP, ANCHOR_END, -90 * EDSCALE);
+	info_panel->set_anchor_and_offset(SIDE_RIGHT, ANCHOR_END, -10 * EDSCALE);
+	info_panel->set_anchor_and_offset(SIDE_BOTTOM, ANCHOR_END, -10 * EDSCALE);
+	info_panel->set_h_grow_direction(GROW_DIRECTION_BEGIN);
+	info_panel->set_v_grow_direction(GROW_DIRECTION_BEGIN);
+	info_panel->set_mouse_filter(MOUSE_FILTER_IGNORE);
+	surface->add_child(info_panel);
+	info_panel->hide();
+
 	info_label = memnew(Label);
-	info_label->set_anchor_and_offset(SIDE_LEFT, ANCHOR_END, -90 * EDSCALE);
-	info_label->set_anchor_and_offset(SIDE_TOP, ANCHOR_END, -90 * EDSCALE);
-	info_label->set_anchor_and_offset(SIDE_RIGHT, ANCHOR_END, -10 * EDSCALE);
-	info_label->set_anchor_and_offset(SIDE_BOTTOM, ANCHOR_END, -10 * EDSCALE);
-	info_label->set_h_grow_direction(GROW_DIRECTION_BEGIN);
-	info_label->set_v_grow_direction(GROW_DIRECTION_BEGIN);
-	surface->add_child(info_label);
-	info_label->hide();
+	info_panel->add_child(info_label);
 
 	cinema_label = memnew(Label);
 	cinema_label->set_anchor_and_offset(SIDE_TOP, ANCHOR_BEGIN, 10 * EDSCALE);
@@ -5475,6 +5482,7 @@ Node3DEditorViewport::Node3DEditorViewport(Node3DEditor *p_spatial_editor, int p
 	top_right_vbox->add_child(rotation_control);
 
 	frame_time_panel = memnew(PanelContainer);
+	frame_time_panel->set_mouse_filter(MOUSE_FILTER_IGNORE);
 	top_right_vbox->add_child(frame_time_panel);
 	frame_time_panel->hide();
 
@@ -8469,7 +8477,7 @@ Node3DEditor::Node3DEditor() {
 
 	camera_override_viewport_id = 0;
 
-	// Add some margin to the sides for better esthetics.
+	// Add some margin to the sides for better aesthetics.
 	// This prevents the first button's hover/pressed effect from "touching" the panel's border,
 	// which looks ugly.
 	MarginContainer *toolbar_margin = memnew(MarginContainer);

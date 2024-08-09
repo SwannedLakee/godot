@@ -214,11 +214,6 @@ def get_opts():
             os.path.join(d3d12_deps_folder, "mesa"),
         ),
         (
-            "dxc_path",
-            "Path to the DirectX Shader Compiler distribution (required for D3D12)",
-            os.path.join(d3d12_deps_folder, "dxc"),
-        ),
-        (
             "agility_sdk_path",
             "Path to the Agility SDK distribution (optional for D3D12)",
             os.path.join(d3d12_deps_folder, "agility_sdk"),
@@ -306,7 +301,6 @@ def setup_msvc_manual(env: "SConsEnvironment"):
     print("Using VCVARS-determined MSVC, arch %s" % (env_arch))
 
 
-# FIXME: Likely overwrites command-line options for the msvc compiler. See #91883.
 def setup_msvc_auto(env: "SConsEnvironment"):
     """Set up MSVC using SCons's auto-detection logic"""
 
@@ -338,6 +332,12 @@ def setup_msvc_auto(env: "SConsEnvironment"):
         env["MSVC_VERSION"] = env["msvc_version"]
     env.Tool("msvc")
     env.Tool("mssdk")  # we want the MS SDK
+
+    # Re-add potentially overwritten flags.
+    env.AppendUnique(CCFLAGS=env.get("ccflags", "").split())
+    env.AppendUnique(CXXFLAGS=env.get("cxxflags", "").split())
+    env.AppendUnique(CFLAGS=env.get("cflags", "").split())
+    env.AppendUnique(RCFLAGS=env.get("rcflags", "").split())
 
     # Note: actual compiler version can be found in env['MSVC_VERSION'], e.g. "14.1" for VS2015
     print("Using SCons-detected MSVC version %s, arch %s" % (env["MSVC_VERSION"], env["arch"]))
@@ -467,6 +467,8 @@ def configure_msvc(env: "SConsEnvironment", vcvars_msvc_config):
     if env["arch"] == "x86_32":
         env["x86_libtheora_opt_vc"] = True
 
+    env.Append(CCFLAGS=["/fp:strict"])
+
     env.AppendUnique(CCFLAGS=["/Gd", "/GR", "/nologo"])
     env.AppendUnique(CCFLAGS=["/utf-8"])  # Force to use Unicode encoding.
     env.AppendUnique(CXXFLAGS=["/TP"])  # assume all sources are C++
@@ -499,6 +501,14 @@ def configure_msvc(env: "SConsEnvironment", vcvars_msvc_config):
     env.AppendUnique(CPPDEFINES=["NOMINMAX"])  # disable bogus min/max WinDef.h macros
     if env["arch"] == "x86_64":
         env.AppendUnique(CPPDEFINES=["_WIN64"])
+
+    # Sanitizers
+    prebuilt_lib_extra_suffix = ""
+    if env["use_asan"]:
+        env.extra_suffix += ".san"
+        prebuilt_lib_extra_suffix = ".san"
+        env.Append(CCFLAGS=["/fsanitize=address"])
+        env.Append(LINKFLAGS=["/INFERASANLIBS"])
 
     ## Libs
 
@@ -567,7 +577,7 @@ def configure_msvc(env: "SConsEnvironment", vcvars_msvc_config):
             LIBS += ["WinPixEventRuntime"]
 
         env.Append(LIBPATH=[env["mesa_libs"] + "/bin"])
-        LIBS += ["libNIR.windows." + env["arch"]]
+        LIBS += ["libNIR.windows." + env["arch"] + prebuilt_lib_extra_suffix]
 
     if env["opengl3"]:
         env.AppendUnique(CPPDEFINES=["GLES3_ENABLED"])
@@ -575,9 +585,9 @@ def configure_msvc(env: "SConsEnvironment", vcvars_msvc_config):
             env.AppendUnique(CPPDEFINES=["EGL_STATIC"])
             env.Append(LIBPATH=[env["angle_libs"]])
             LIBS += [
-                "libANGLE.windows." + env["arch"],
-                "libEGL.windows." + env["arch"],
-                "libGLES.windows." + env["arch"],
+                "libANGLE.windows." + env["arch"] + prebuilt_lib_extra_suffix,
+                "libEGL.windows." + env["arch"] + prebuilt_lib_extra_suffix,
+                "libGLES.windows." + env["arch"] + prebuilt_lib_extra_suffix,
             ]
             LIBS += ["dxgi", "d3d9", "d3d11"]
         env.Prepend(CPPPATH=["#thirdparty/angle/include"])
@@ -613,12 +623,6 @@ def configure_msvc(env: "SConsEnvironment", vcvars_msvc_config):
         env.Prepend(CPPPATH=[p for p in str(os.getenv("INCLUDE")).split(";")])
         env.Append(LIBPATH=[p for p in str(os.getenv("LIB")).split(";")])
 
-    # Sanitizers
-    if env["use_asan"]:
-        env.extra_suffix += ".san"
-        env.Append(LINKFLAGS=["/INFERASANLIBS"])
-        env.Append(CCFLAGS=["/fsanitize=address"])
-
     # Incremental linking fix
     env["BUILDERS"]["ProgramOriginal"] = env["BUILDERS"]["Program"]
     env["BUILDERS"]["Program"] = methods.precious_program
@@ -642,7 +646,8 @@ def configure_mingw(env: "SConsEnvironment"):
 
     # TODO: Re-evaluate the need for this / streamline with common config.
     if env["target"] == "template_release":
-        env.Append(CCFLAGS=["-msse2"])
+        if env["arch"] != "arm64":
+            env.Append(CCFLAGS=["-msse2"])
     elif env.dev_build:
         # Allow big objects. It's supposed not to have drawbacks but seems to break
         # GCC LTO, so enabling for debug builds only (which are not built with LTO
@@ -671,6 +676,8 @@ def configure_mingw(env: "SConsEnvironment"):
 
     if env["arch"] in ["x86_32", "x86_64"]:
         env["x86_libtheora_opt_gcc"] = True
+
+    env.Append(CCFLAGS=["-ffp-contract=off"])
 
     mingw_bin_prefix = get_mingw_bin_prefix(env["mingw_prefix"], env["arch"])
 

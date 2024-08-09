@@ -78,6 +78,7 @@ def get_flags():
         # -Os reduces file size by around 5 MiB over -O3. -Oz only saves about
         # 100 KiB over -Os, which does not justify the negative impact on
         # run-time performance.
+        # Note that this overrides the "auto" behavior for target/dev_build.
         "optimize": "size",
     }
 
@@ -226,6 +227,11 @@ def configure(env: "SConsEnvironment"):
         env.Append(LINKFLAGS=["-sDEFAULT_PTHREAD_STACK_SIZE=%sKB" % env["default_pthread_stack_size"]])
         env.Append(LINKFLAGS=["-sPTHREAD_POOL_SIZE=8"])
         env.Append(LINKFLAGS=["-sWASM_MEM_MAX=2048MB"])
+        if not env["dlink_enabled"]:
+            # Workaround https://github.com/emscripten-core/emscripten/issues/21844#issuecomment-2116936414.
+            # Not needed (and potentially dangerous) when dlink_enabled=yes, since we set EXPORT_ALL=1 in that case.
+            env.Append(LINKFLAGS=["-sEXPORTED_FUNCTIONS=['__emscripten_thread_crashed','_main']"])
+
     elif env["proxy_to_pthread"]:
         print_warning('"threads=no" support requires "proxy_to_pthread=no", disabling proxy to pthread.')
         env["proxy_to_pthread"] = False

@@ -139,9 +139,17 @@ void GenericTilePolygonEditor::_base_control_draw() {
 	const Ref<StyleBox> focus_stylebox = get_theme_stylebox(SNAME("Focus"), EditorStringName(EditorStyles));
 
 	// Get the background data.
-	TileData *tile_data = background_atlas_source->get_tile_data(background_atlas_coords, background_alternative_id);
-	ERR_FAIL_NULL(tile_data);
-	Rect2 background_region = background_atlas_source->get_tile_texture_region(background_atlas_coords);
+	Rect2 background_region;
+	TileData *tile_data = nullptr;
+
+	if (background_atlas_source.is_valid()) {
+		tile_data = background_atlas_source->get_tile_data(background_atlas_coords, background_alternative_id);
+		ERR_FAIL_NULL(tile_data);
+		background_region = background_atlas_source->get_tile_texture_region(background_atlas_coords);
+	} else {
+		// If no tile was selected yet, use default size.
+		background_region.size = tile_set->get_tile_size();
+	}
 
 	// Draw the focus rectangle.
 	if (base_control->has_focus()) {
@@ -157,11 +165,14 @@ void GenericTilePolygonEditor::_base_control_draw() {
 	base_control->draw_set_transform_matrix(xform);
 
 	// Draw fill rect under texture region.
-	Rect2 texture_rect(-background_region.size / 2 - tile_data->get_texture_origin(), background_region.size);
+	Rect2 texture_rect(-background_region.size / 2, background_region.size);
+	if (tile_data) {
+		texture_rect.position -= tile_data->get_texture_origin();
+	}
 	base_control->draw_rect(texture_rect, Color(1, 1, 1, 0.3));
 
 	// Draw the background.
-	if (background_atlas_source->get_texture().is_valid()) {
+	if (tile_data && background_atlas_source->get_texture().is_valid()) {
 		Size2 region_size = background_region.size;
 		if (tile_data->get_flip_h()) {
 			region_size.x = -region_size.x;
@@ -174,8 +185,13 @@ void GenericTilePolygonEditor::_base_control_draw() {
 
 	// Compute and draw the grid area.
 	Rect2 grid_area = Rect2(-base_tile_size / 2, base_tile_size);
-	grid_area.expand_to(-background_region.get_size() / 2 - tile_data->get_texture_origin());
-	grid_area.expand_to(background_region.get_size() / 2 - tile_data->get_texture_origin());
+	if (tile_data) {
+		grid_area.expand_to(-background_region.get_size() / 2 - tile_data->get_texture_origin());
+		grid_area.expand_to(background_region.get_size() / 2 - tile_data->get_texture_origin());
+	} else {
+		grid_area.expand_to(-background_region.get_size() / 2);
+		grid_area.expand_to(background_region.get_size() / 2);
+	}
 	base_control->draw_rect(grid_area, Color(1, 1, 1, 0.3), false);
 
 	// Draw grid.
@@ -249,7 +265,7 @@ void GenericTilePolygonEditor::_base_control_draw() {
 		for (int i = 0; i < (int)polygons.size(); i++) {
 			const Vector<Vector2> &polygon = polygons[i];
 			for (int j = 0; j < polygon.size(); j++) {
-				const Color poly_modulate = (tinted_polygon_index == i && tinted_point_index == j) ? Color(0.5, 1, 2) : Color(1, 1, 1);
+				const Color poly_modulate = (tinted_polygon_index == i && tinted_point_index == j) ? Color(0.4, 1, 1) : Color(1, 1, 1);
 				base_control->draw_texture(handle, xform.xform(polygon[j]) - handle->get_size() / 2, poly_modulate);
 			}
 		}
@@ -265,7 +281,7 @@ void GenericTilePolygonEditor::_base_control_draw() {
 	}
 
 	if (drag_type == DRAG_TYPE_CREATE_POINT) {
-		base_control->draw_texture(handle, xform.xform(in_creation_point) - handle->get_size() / 2, Color(0.5, 1, 2));
+		base_control->draw_texture(handle, xform.xform(in_creation_point) - handle->get_size() / 2, Color(0.4, 1, 1));
 	}
 
 	// Draw the point creation preview in edit mode.

@@ -77,7 +77,7 @@ class Sample {
 	 * Creates a `Sample` based on the params. Will register it to the
 	 * `GodotAudio.samples` registry.
 	 * @param {SampleParams} params Base params
-	 * @param {SampleOptions} [options={}] Optional params
+	 * @param {SampleOptions} [options={{}}] Optional params
 	 * @returns {Sample}
 	 */
 	static create(params, options = {}) {
@@ -98,8 +98,7 @@ class Sample {
 	/**
 	 * `Sample` constructor.
 	 * @param {SampleParams} params Base params
-	 * @param {SampleOptions} [options={}] Optional params
-	 * @constructor
+	 * @param {SampleOptions} [options={{}}] Optional params
 	 */
 	constructor(params, options = {}) {
 		/** @type {string} */
@@ -142,7 +141,7 @@ class Sample {
 	 * @returns {void}
 	 */
 	clear() {
-		this.audioBuffer = null;
+		this.setAudioBuffer(null);
 		GodotAudio.Sample.delete(this.id);
 	}
 
@@ -154,7 +153,7 @@ class Sample {
 		if (this._audioBuffer == null) {
 			throw new Error('couldn\'t duplicate a null audioBuffer');
 		}
-		/** @type {Float32Array[]} */
+		/** @type {Array<Float32Array>} */
 		const channels = new Array(this._audioBuffer.numberOfChannels);
 		for (let i = 0; i < this._audioBuffer.numberOfChannels; i++) {
 			const channel = new Float32Array(this._audioBuffer.getChannelData(i));
@@ -189,7 +188,6 @@ class SampleNodeBus {
 	/**
 	 * `SampleNodeBus` constructor.
 	 * @param {Bus} bus The bus related to the new `SampleNodeBus`.
-	 * @constructor
 	 */
 	constructor(bus) {
 		const NUMBER_OF_WEB_CHANNELS = 6;
@@ -413,8 +411,7 @@ class SampleNode {
 
 	/**
 	 * @param {SampleNodeParams} params Base params
-	 * @param {SampleNodeOptions} [options={}] Optional params
-	 * @constructor
+	 * @param {SampleNodeOptions} [options={{}}] Optional params
 	 */
 	constructor(params, options = {}) {
 		/** @type {string} */
@@ -432,7 +429,7 @@ class SampleNode {
 		/** @type {number} */
 		this._playbackRate = 44100;
 		/** @type {LoopMode} */
-		this.loopMode = 'disabled';
+		this.loopMode = options.loopMode ?? this.getSample().loopMode ?? 'disabled';
 		/** @type {number} */
 		this._pitchScale = 1;
 		/** @type {number} */
@@ -441,11 +438,10 @@ class SampleNode {
 		this._sampleNodeBuses = new Map();
 		/** @type {AudioBufferSourceNode | null} */
 		this._source = GodotAudio.ctx.createBufferSource();
-		/** @type {AudioBufferSourceNode["onended"]} */
+
 		this._onended = null;
 
 		this.setPlaybackRate(options.playbackRate ?? 44100);
-		this.loopMode = options.loopMode ?? this.getSample().loopMode ?? 'disabled';
 		this._source.buffer = this.getSample().getAudioBuffer();
 
 		this._addEndedListener();
@@ -559,7 +555,7 @@ class SampleNode {
 
 	/**
 	 * Sets the volumes of the `SampleNode` for each buses passed in parameters.
-	 * @param {Bus[]} buses
+	 * @param {Array<Bus>} buses
 	 * @param {Float32Array} volumes
 	 */
 	setVolumes(buses, volumes) {
@@ -634,7 +630,9 @@ class SampleNode {
 	 * @returns {void}
 	 */
 	_restart() {
-		this._source.disconnect();
+		if (this._source != null) {
+			this._source.disconnect();
+		}
 		this._source = GodotAudio.ctx.createBufferSource();
 		this._source.buffer = this.getSample().getAudioBuffer();
 
@@ -688,9 +686,15 @@ class SampleNode {
 			}
 
 			switch (self.getSample().loopMode) {
-			case 'disabled':
+			case 'disabled': {
+				const id = this.id;
 				self.stop();
-				break;
+				if (GodotAudio.sampleFinishedCallback != null) {
+					const idCharPtr = GodotRuntime.allocString(id);
+					GodotAudio.sampleFinishedCallback(idCharPtr);
+					GodotRuntime.free(idCharPtr);
+				}
+			} break;
 			case 'forward':
 			case 'backward':
 				self.restart();
@@ -777,8 +781,7 @@ class Bus {
 	 */
 	static move(fromIndex, toIndex) {
 		const movedBus = GodotAudio.Bus.getBus(fromIndex);
-		let buses = GodotAudio.buses;
-		buses = buses.filter((_, i) => i !== fromIndex);
+		const buses = GodotAudio.buses.filter((_, i) => i !== fromIndex);
 		// Inserts at index.
 		buses.splice(toIndex - 1, 0, movedBus);
 		GodotAudio.buses = buses;
@@ -814,7 +817,6 @@ class Bus {
 
 	/**
 	 * `Bus` constructor.
-	 * @constructor
 	 */
 	constructor() {
 		/** @type {Set<SampleNode>} */
@@ -858,7 +860,10 @@ class Bus {
 	 * @returns {void}
 	 */
 	setVolumeDb(val) {
-		this._gainNode.gain.value = GodotAudio.db_to_linear(val);
+		const linear = GodotAudio.db_to_linear(val);
+		if (isFinite(linear)) {
+			this._gainNode.gain.value = linear;
+		}
 	}
 
 	/**
@@ -981,7 +986,6 @@ class Bus {
 		GodotAudio.buses = GodotAudio.buses.filter((v) => v !== this);
 	}
 
-	/** @type {Bus["prototype"]["_syncSampleNodes"]} */
 	_syncSampleNodes() {
 		const sampleNodes = Array.from(this._sampleNodes);
 		for (let i = 0; i < sampleNodes.length; i++) {
@@ -1082,7 +1086,7 @@ const _GodotAudio = {
 		// `Bus` class
 		/**
 		 * Registry of `Bus`es.
-		 * @type {Bus[]}
+		 * @type {Array<Bus>}
 		 */
 		buses: null,
 		/**
@@ -1091,6 +1095,12 @@ const _GodotAudio = {
 		 */
 		busSolo: null,
 		Bus,
+
+		/**
+		 * Callback to signal that a sample has finished.
+		 * @type {(playbackObjectIdPtr: number) => void | null}
+		 */
+		sampleFinishedCallback: null,
 
 		/** @type {AudioContext} */
 		ctx: null,
@@ -1299,7 +1309,7 @@ const _GodotAudio = {
 		/**
 		 * Triggered when a sample node volumes need to be updated.
 		 * @param {string} playbackObjectId Id of the sample playback
-		 * @param {number[]} busIndexes Indexes of the buses that need to be updated
+		 * @param {Array<number>} busIndexes Indexes of the buses that need to be updated
 		 * @param {Float32Array} volumes Array of the volumes
 		 * @returns {void}
 		 */
@@ -1369,7 +1379,7 @@ const _GodotAudio = {
 		 */
 		set_sample_bus_volume_db: function (busIndex, volumeDb) {
 			const bus = GodotAudio.Bus.getBus(busIndex);
-			bus.volumeDb = volumeDb;
+			bus.setVolumeDb(volumeDb);
 		},
 
 		/**
@@ -1765,6 +1775,17 @@ const _GodotAudio = {
 	 */
 	godot_audio_sample_bus_set_mute: function (bus, enable) {
 		GodotAudio.set_sample_bus_mute(bus, Boolean(enable));
+	},
+
+	godot_audio_sample_set_finished_callback__proxy: 'sync',
+	godot_audio_sample_set_finished_callback__sig: 'vi',
+	/**
+	 * Sets the finished callback
+	 * @param {Number} callbackPtr Finished callback pointer
+	 * @returns {void}
+	 */
+	godot_audio_sample_set_finished_callback: function (callbackPtr) {
+		GodotAudio.sampleFinishedCallback = GodotRuntime.get_func(callbackPtr);
 	},
 };
 
